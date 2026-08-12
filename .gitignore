@@ -1,0 +1,26 @@
+# Local environments and Python output
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Local configuration, credentials, and evidence
+.env
+.env.*
+*.pem
+browser_profiles/
+*_browser_evidence/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Temporary visual design companion
+.superpowers/
