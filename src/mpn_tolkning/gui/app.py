@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, Qt
-from PyQt6.QtGui import QColor, QFont, QIcon
+from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -68,6 +68,9 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MPN Tolkning")
+        icon_path = Path(__file__).resolve().parents[1] / "assets" / "variant-lens.ico"
+        if icon_path.is_file():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.setMinimumSize(1120, 720)
         self.resize(1380, 860)
         self.settings = AppSettings.load()
@@ -117,6 +120,10 @@ class MainWindow(QMainWindow):
         mark = QLabel("⌕")
         mark.setObjectName("brandMark")
         mark.setAccessibleName("Variant Lens mark")
+        icon_path = Path(__file__).resolve().parents[1] / "assets" / "variant-lens-48.png"
+        if icon_path.is_file():
+            mark.setText("")
+            mark.setPixmap(QPixmap(str(icon_path)))
         brand = QLabel("MPN\nTolkning")
         brand.setObjectName("brand")
         brand_row = QHBoxLayout()
