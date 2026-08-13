@@ -8,6 +8,7 @@ __pycache__/
 htmlcov/
 build/
 dist/
+artifacts/
 
 # Local configuration, credentials, and evidence
 .env
