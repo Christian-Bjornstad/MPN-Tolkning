@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Mapping
 from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from mpn_tolkning.core.context import classify_driver_context
+from mpn_tolkning.core.identity import stable_variant_key
 from mpn_tolkning.core.models import EvidenceResult, VariantRecord
 
 
@@ -86,7 +88,7 @@ def write_patient_report(
     path: Path,
     sample: str,
     variants: Sequence[VariantRecord],
-    evidence: Sequence[EvidenceResult],
+    evidence: Sequence[EvidenceResult] | Mapping[str, EvidenceResult],
 ) -> Path:
     output = Path(path)
     if output.suffix.lower() != ".xlsx":
@@ -140,7 +142,14 @@ def write_patient_report(
         sheet.append(("Database", "Status", "Summary", "Link", "Expected identity", "Observed identity"))
         _style_header(sheet[4])
         row = 5
-        for item in _sorted_evidence(evidence):
+        if isinstance(evidence, Mapping):
+            result_prefix = f"{sample}|{stable_variant_key(variant)}|"
+            variant_evidence = [
+                result for key, result in evidence.items() if key.startswith(result_prefix)
+            ]
+        else:
+            variant_evidence = list(evidence)
+        for item in _sorted_evidence(variant_evidence):
             sheet.cell(row, 1, item.provider)
             sheet.cell(row, 2, item.status.value)
             sheet.cell(row, 3, item.summary)
@@ -187,7 +196,7 @@ def write_patient_report(
 class _PendingReport:
     sample: str
     variants: tuple[VariantRecord, ...]
-    evidence: tuple[EvidenceResult, ...]
+    evidence: Sequence[EvidenceResult] | Mapping[str, EvidenceResult]
 
 
 class PatientReportCoordinator:
@@ -203,7 +212,7 @@ class PatientReportCoordinator:
         self,
         sample: str,
         variants: Sequence[VariantRecord],
-        evidence: Sequence[EvidenceResult],
+        evidence: Sequence[EvidenceResult] | Mapping[str, EvidenceResult],
     ) -> Path:
         return write_patient_report(self.output_directory, sample, variants, evidence)
 
@@ -211,9 +220,10 @@ class PatientReportCoordinator:
         self,
         sample: str,
         variants: Sequence[VariantRecord],
-        evidence: Sequence[EvidenceResult],
+        evidence: Sequence[EvidenceResult] | Mapping[str, EvidenceResult],
     ) -> Path | None:
-        payload = _PendingReport(sample, tuple(variants), tuple(evidence))
+        stored_evidence = dict(evidence) if isinstance(evidence, Mapping) else tuple(evidence)
+        payload = _PendingReport(sample, tuple(variants), stored_evidence)
         try:
             output = self._save(payload.sample, payload.variants, payload.evidence)
         except PermissionError:
@@ -235,14 +245,21 @@ class PatientReportCoordinator:
     def write_all(
         self,
         variants: Iterable[VariantRecord],
-        evidence: Sequence[EvidenceResult],
+        evidence: Sequence[EvidenceResult] | Mapping[str, EvidenceResult],
     ) -> dict[str, Path]:
         grouped: dict[str, list[VariantRecord]] = defaultdict(list)
         for variant in variants:
             grouped[variant.sample].append(variant)
         written: dict[str, Path] = {}
         for sample, sample_variants in grouped.items():
-            path = self.update_patient(sample, sample_variants, evidence)
+            if isinstance(evidence, Mapping):
+                sample_prefix = f"{sample}|"
+                sample_evidence = {
+                    key: result for key, result in evidence.items() if key.startswith(sample_prefix)
+                }
+            else:
+                sample_evidence = evidence
+            path = self.update_patient(sample, sample_variants, sample_evidence)
             if path is not None:
                 written[sample] = path
         return written

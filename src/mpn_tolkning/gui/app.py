@@ -613,7 +613,7 @@ class MainWindow(QMainWindow):
             return
         coordinator = PatientReportCoordinator(self._output_directory())
         thread = QThread(self)
-        worker = ReportWorker(coordinator, self.variants, tuple(self.evidence_results.values()))
+        worker = ReportWorker(coordinator, self.variants, self.evidence_results)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._reports_completed)

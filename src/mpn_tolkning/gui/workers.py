@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Sequence
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -83,12 +84,12 @@ class ReportWorker(QObject):
         self,
         coordinator: PatientReportCoordinator,
         variants: Sequence[VariantRecord],
-        evidence: Sequence[EvidenceResult],
+        evidence: Sequence[EvidenceResult] | Mapping[str, EvidenceResult],
     ):
         super().__init__()
         self.coordinator = coordinator
         self.variants = tuple(variants)
-        self.evidence = tuple(evidence)
+        self.evidence = dict(evidence) if isinstance(evidence, Mapping) else tuple(evidence)
 
     @pyqtSlot()
     def run(self) -> None:
