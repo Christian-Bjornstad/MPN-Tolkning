@@ -24,3 +24,6 @@ Thumbs.db
 
 # Temporary visual design companion
 .superpowers/
+
+# Isolated feature workspaces
+.worktrees/
