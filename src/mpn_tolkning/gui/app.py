@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import sys
-import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
-from PyQt6.QtCore import QThread, Qt
+from PyQt6.QtCore import QThread, QTimer, Qt
 from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -30,9 +29,8 @@ from PyQt6.QtWidgets import (
 )
 
 from mpn_tolkning.core.context import classify_driver_context
-from mpn_tolkning.core.identity import stable_variant_key
+from mpn_tolkning.core.identity import IdentityConfidence, stable_variant_key, variant_identity_confidence
 from mpn_tolkning.core.models import EvidenceResult, VariantRecord
-from mpn_tolkning.core.rules import default_artifact_rules, evaluate_artifact
 from mpn_tolkning.gui.workers import ImportWorker, ReportWorker, SearchWorker
 from mpn_tolkning.providers.browser import (
     CosmicProvider,
@@ -43,12 +41,14 @@ from mpn_tolkning.providers.browser import (
     edge_browser_factory,
 )
 from mpn_tolkning.providers.calr_et import CalrEtProvider
+from mpn_tolkning.providers.identity import ClinGenAlleleProvider, CivicProvider, MetaKbProvider
 from mpn_tolkning.reports.patient import PatientReportCoordinator
-from mpn_tolkning.reports.review import write_review_workbook
+from mpn_tolkning.reports.review import load_skip_keys
+from mpn_tolkning.services.audit import AuditStore
 from mpn_tolkning.services.capture import screenshot_path
 from mpn_tolkning.services.edge_cdp import EdgeCdpSession
 from mpn_tolkning.services.queue import EvidenceQueue
-from mpn_tolkning.services.settings import AppSettings, REQUIRED_PROVIDERS
+from mpn_tolkning.services.settings import AppSettings, OPTIONAL_PROVIDERS, REQUIRED_PROVIDERS
 
 
 class Palette:
@@ -60,6 +60,26 @@ class Palette:
     TEXT = "#17302F"
     MUTED = "#61716F"
     BORDER = "#D6E2E0"
+
+
+AUTHENTICATED_PROVIDER_URLS = {
+    "MTBP": "https://mtbp.org/analyse/",
+    "Franklin": "https://franklin.genoox.com/",
+    "OncoKB": "https://www.oncokb.org/",
+    "COSMIC": "https://cancer.sanger.ac.uk/cosmic/",
+}
+
+
+def trusted_calr_detail_url(value: str) -> bool:
+    parsed = urlparse(value)
+    query = parse_qs(parsed.query)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == "www.dsimb.inserm.fr"
+        and parsed.path == "/CALR-ET/php/variant_page.php"
+        and len(query.get("num_var", [])) == 1
+        and query["num_var"][0].startswith("var")
+    )
 
 
 class MainWindow(QMainWindow):
@@ -81,6 +101,8 @@ class MainWindow(QMainWindow):
         self._threads: list[QThread] = []
         self._workers: list[object] = []
         self._search_worker: SearchWorker | None = None
+        self._closing = False
+        self._sign_in_sessions: list[EdgeCdpSession] = []
         self.metric_values: dict[str, QLabel] = {}
         self.provider_status_labels: dict[str, QLabel] = {}
 
@@ -283,9 +305,9 @@ class MainWindow(QMainWindow):
             "Provider pages run in isolated Microsoft Edge profiles. A result counts only after identity verification and a valid capture.",
         )
         provider_grid = QGridLayout()
-        for index, provider in enumerate(REQUIRED_PROVIDERS):
+        for index, provider in enumerate(REQUIRED_PROVIDERS + OPTIONAL_PROVIDERS):
             card = self._card(provider)
-            status = QLabel("Ready")
+            status = QLabel("Not checked")
             status.setObjectName("providerReady")
             status.setAccessibleName(f"{provider} status")
             card.layout().addWidget(status)
@@ -348,16 +370,28 @@ class MainWindow(QMainWindow):
     def _build_settings_page(self) -> QWidget:
         page, layout = self._page(
             "Settings",
-            "Choose evidence sources and browser behavior. Passwords are stored separately in Windows Credential Manager.",
+            "Choose primary and supplementary evidence sources. Authenticated sources reuse isolated local Edge profiles; passwords are never written to app settings.",
         )
         providers = self._card("EVIDENCE SOURCES")
         self.provider_checks: dict[str, QCheckBox] = {}
-        for name in REQUIRED_PROVIDERS:
+        for name in REQUIRED_PROVIDERS + OPTIONAL_PROVIDERS:
             check = QCheckBox(name)
             check.setChecked(name in self.settings.selected_providers)
             self.provider_checks[name] = check
             providers.layout().addWidget(check)
         layout.addWidget(providers)
+        sign_in = self._card("AUTHENTICATED BROWSER PROFILES")
+        sign_in.layout().addWidget(QLabel("Open a visible provider window, sign in, then start evidence collection. The local provider profile retains the session."))
+        self.sign_in_buttons: dict[str, QPushButton] = {}
+        sign_in_grid = QGridLayout()
+        for index, (name, url) in enumerate(AUTHENTICATED_PROVIDER_URLS.items()):
+            button = QPushButton(f"Open {name} sign-in")
+            button.setMinimumHeight(40)
+            button.clicked.connect(lambda checked=False, provider=name, target=url: self._open_sign_in(provider, target))
+            self.sign_in_buttons[name] = button
+            sign_in_grid.addWidget(button, index // 2, index % 2)
+        sign_in.layout().addLayout(sign_in_grid)
+        layout.addWidget(sign_in)
         browser = self._card("BROWSER")
         self.background_check = QCheckBox("Run evidence Edge windows minimized")
         self.background_check.setChecked(self.settings.browser_background)
@@ -459,12 +493,12 @@ class MainWindow(QMainWindow):
         display_protein = "frameshift" if "fs" in protein and len(protein) > 14 else protein
         self.variant_title.setText(f"{variant.gene} · {display_protein}".strip(" ·"))
         self.variant_identity_label.setText(
-            f"{variant.hgvsc}\n{variant.hgvsp}\n{stable_variant_key(variant)}"
+            f"{variant.hgvsc}\n{variant.hgvsp}\n{stable_variant_key(variant)}\nIdentity: {variant_identity_confidence(variant).value}"
         )
-        self.driver_context_label.setText(
-            (context.label + "\n" + context.detail).strip()
-            or "No predefined MPN driver label. Keep visible for qualified review."
-        )
+        context_text = (context.label + "\n" + context.detail).strip()
+        if variant_identity_confidence(variant) is IdentityConfidence.REDUCED:
+            context_text += "\nReduced identity: exact genomic matching is unavailable."
+        self.driver_context_label.setText(context_text.strip() or "No predefined MPN driver label. Keep visible for qualified review.")
 
     def _choose_import(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(self, "Choose Archer TSV", "", "TSV files (*.tsv *.txt);;All files (*)")
@@ -472,11 +506,14 @@ class MainWindow(QMainWindow):
             self.load_file(Path(filename))
 
     def load_file(self, path: Path) -> None:
+        if self._threads:
+            self._show_error("Another task is still running. Wait for it to finish before importing.")
+            return
         self.import_path = Path(path)
         self.import_path_label.setText(str(self.import_path))
         self._set_status("Importing…", busy=True)
         thread = QThread(self)
-        worker = ImportWorker(self.import_path)
+        worker = ImportWorker(self.import_path, self._output_directory(), self.settings.artifact_rules)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._import_completed)
@@ -490,13 +527,10 @@ class MainWindow(QMainWindow):
         self._workers.append(worker)
         thread.start()
 
-    def _import_completed(self, variants) -> None:
+    def _import_completed(self, payload) -> None:
+        variants, workbook = payload
         self.set_variants(variants)
-        output = self._output_directory()
-        contexts = {stable_variant_key(v): classify_driver_context(v) for v in self.variants}
-        rules = default_artifact_rules()
-        artifacts = {stable_variant_key(v): evaluate_artifact(v, rules) for v in self.variants}
-        self.review_workbook = write_review_workbook(output / "MPN_Variant_Review.xlsx", self.variants, contexts, artifacts)
+        self.review_workbook = Path(workbook)
         self.review_report_card.status_label.setText(str(self.review_workbook))
         self._set_status(f"Imported {len(self.variants)} variants")
         self._navigate(1)
@@ -523,7 +557,11 @@ class MainWindow(QMainWindow):
         output = self._output_directory()
         profile_root = AppSettings.default_path().parent / "browser_profiles"
         captures = output / "evidence_captures"
-        factory = edge_browser_factory(profile_root)
+        factory = edge_browser_factory(
+            profile_root,
+            background=self.settings.browser_background,
+            timeout_ms=self.settings.navigation_timeout_ms,
+        )
         selected = {name for name, check in self.provider_checks.items() if check.isChecked()}
         providers = []
         if "CALR-ETdb" in selected:
@@ -537,25 +575,34 @@ class MainWindow(QMainWindow):
         }
         for name in REQUIRED_PROVIDERS[1:]:
             if name in selected:
-                providers.append(classes[name](factory, captures))
+                providers.append(
+                    classes[name](
+                        factory,
+                        captures,
+                        analysis_timeout_ms=self.settings.analysis_timeout_ms,
+                    )
+                )
+        if "ClinGen Allele Registry" in selected:
+            providers.append(ClinGenAlleleProvider())
+        if "CIViC" in selected:
+            providers.append(CivicProvider(enabled=True))
+        if "MetaKB" in selected:
+            providers.append(MetaKbProvider(enabled=True))
         return providers
 
     def _capture_calr_result(self, variant: VariantRecord, context, url: str):
+        if not trusted_calr_detail_url(url):
+            raise ValueError("CALR-ETdb did not provide a trusted variant detail URL")
         session = EdgeCdpSession(AppSettings.default_path().parent / "browser_profiles", background=self.settings.browser_background)
-        target = screenshot_path(self._output_directory() / "evidence_captures", context.stable_key, "CALR-ETdb", 1)
+        target = screenshot_path(
+            self._output_directory() / "evidence_captures",
+            f"{variant.sample}|{context.stable_key}",
+            "CALR-ETdb",
+            1,
+        )
         try:
             session.start("CALR-ETdb")
-            session.navigate(CalrEtProvider.SEARCH_URL)
-            cdna = json.dumps(context.cdna)
-            submitted = session.evaluate(
-                "(() => { const input=document.querySelector('input[name=nucleotid]');"
-                " if(!input) return false; input.value=" + cdna + ";"
-                " input.dispatchEvent(new Event('input',{bubbles:true}));"
-                " const form=input.closest('form'); if(!form) return false; form.submit(); return true; })()"
-            )
-            if not submitted:
-                raise ValueError("CALR-ETdb cDNA form was not available")
-            time.sleep(2)
+            session.navigate(url)
             body = str(session.evaluate("document.body?.innerText || ''") or "")
             if context.cdna not in body:
                 raise ValueError("CALR-ETdb capture did not show the submitted cDNA")
@@ -565,16 +612,33 @@ class MainWindow(QMainWindow):
             session.close()
 
     def _start_search(self) -> None:
+        if self._threads:
+            self._show_error("Another task is still running. Wait for it to finish before searching.")
+            return
         if not self.variants:
             self._show_error("Import an Archer TSV before starting evidence collection.")
             return
+        self._close_sign_in_sessions()
         providers = self._providers()
         if not providers:
             self._show_error("Select at least one evidence provider in Settings.")
             return
-        queue = EvidenceQueue(providers)
+        audit = AuditStore(self._output_directory() / "evidence_audit")
+        queue = EvidenceQueue(providers, audit_callback=audit.save)
+        skip_keys = set()
+        if self.review_workbook and self.review_workbook.exists():
+            try:
+                skip_keys = load_skip_keys(self.review_workbook, self.variants)
+            except Exception as exc:
+                self._show_error(f"The review workbook could not be read: {exc}")
+                return
         thread = QThread(self)
-        worker = SearchWorker(queue, self.variants)
+        worker = SearchWorker(
+            queue,
+            self.variants,
+            skip_keys=skip_keys,
+            existing_results=audit.load_all(),
+        )
         self._search_worker = worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -602,12 +666,18 @@ class MainWindow(QMainWindow):
             values = (result.provider, result.status.value, result.observed_identity or result.expected_identity, result.summary)
             for column, value in enumerate(values):
                 self.evidence_table.setItem(row, column, QTableWidgetItem(str(value)))
-            provider_states[result.provider] = result.status.value.replace("_", " ").title()
+            provider_states[result.provider] = (
+                "Needs sign-in"
+                if "requires sign-in" in result.summary.lower()
+                else result.status.value.replace("_", " ").title()
+            )
         for provider, label in self.provider_status_labels.items():
-            label.setText(provider_states.get(provider, "Ready"))
-        self._start_reports()
+            label.setText(provider_states.get(provider, "Not checked"))
 
     def _start_reports(self) -> None:
+        if self._threads:
+            self._show_error("Another task is still running. Wait for it to finish before generating reports.")
+            return
         if not self.variants:
             self._show_error("Import variants before generating reports.")
             return
@@ -637,6 +707,27 @@ class MainWindow(QMainWindow):
         self.settings.save()
         self._set_status("Settings saved")
 
+    def _open_sign_in(self, provider: str, url: str) -> None:
+        session = EdgeCdpSession(
+            AppSettings.default_path().parent / "browser_profiles",
+            background=False,
+            timeout_ms=self.settings.navigation_timeout_ms,
+        )
+        try:
+            session.start(provider)
+            session.navigate(url)
+        except Exception as exc:
+            session.close()
+            self._show_error(f"Could not open the {provider} sign-in window: {exc}")
+            return
+        self._sign_in_sessions.append(session)
+        self._set_status(f"{provider} sign-in window open")
+
+    def _close_sign_in_sessions(self) -> None:
+        for session in self._sign_in_sessions:
+            session.close()
+        self._sign_in_sessions.clear()
+
     def _set_status(self, text: str, *, busy: bool = False) -> None:
         self.status_badge.setText(text)
         self.status_badge.setProperty("busy", busy)
@@ -651,17 +742,25 @@ class MainWindow(QMainWindow):
     def _discard_thread(self, thread: QThread) -> None:
         if thread in self._threads:
             self._threads.remove(thread)
+        if self._closing and not self._threads:
+            QTimer.singleShot(0, self.close)
 
     def _discard_worker(self, worker: object) -> None:
         if worker in self._workers:
             self._workers.remove(worker)
+        if worker is self._search_worker:
+            self._search_worker = None
 
     def closeEvent(self, event) -> None:
-        if self._search_worker is not None:
-            self._search_worker.stop()
-        for thread in self._threads:
-            thread.quit()
-        super().closeEvent(event)
+        self._close_sign_in_sessions()
+        if self._threads:
+            self._closing = True
+            self._set_status("Stopping background work…", busy=True)
+            if self._search_worker is not None:
+                self._search_worker.stop()
+            event.ignore()
+            return
+        event.accept()
 
     def _style_sheet(self) -> str:
         return f"""

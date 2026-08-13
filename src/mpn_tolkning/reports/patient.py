@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import re
+import hashlib
 from collections import defaultdict
 from collections.abc import Mapping
 from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
+from urllib.parse import urlparse
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as WorksheetImage
@@ -16,6 +18,7 @@ from openpyxl.utils import get_column_letter
 from mpn_tolkning.core.context import classify_driver_context
 from mpn_tolkning.core.identity import stable_variant_key
 from mpn_tolkning.core.models import EvidenceResult, VariantRecord
+from mpn_tolkning.reports.safety import safe_excel_value
 
 
 PROVIDER_ORDER = ("CALR-ETdb", "MTBP", "Franklin", "ClinVar", "OncoKB", "COSMIC")
@@ -27,10 +30,22 @@ _TEAL = "123C3C"
 _ACCENT = "0F766E"
 _AMBER = "D97706"
 _PALE = "F4F8F7"
+_PROVIDER_HOSTS = {
+    "CALR-ETdb": {"www.dsimb.inserm.fr"},
+    "Franklin": {"franklin.genoox.com"},
+    "ClinVar": {"www.ncbi.nlm.nih.gov", "ncbi.nlm.nih.gov"},
+    "OncoKB": {"www.oncokb.org", "oncokb.org"},
+    "COSMIC": {"cancer.sanger.ac.uk"},
+    "ClinGen Allele Registry": {"reg.clinicalgenome.org"},
+    "CIViC": {"civicdb.org", "www.civicdb.org"},
+    "MetaKB": {"search.cancervariants.org"},
+}
 
 
 def _safe_filename(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._") or "sample"
+    readable = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._") or "sample"
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+    return f"{readable}-{digest}"
 
 
 def _safe_sheet_name(value: str, existing: set[str]) -> str:
@@ -50,6 +65,14 @@ def _sorted_evidence(evidence: Sequence[EvidenceResult]) -> list[EvidenceResult]
     return sorted(evidence, key=lambda item: (position.get(item.provider, 999), item.provider.lower()))
 
 
+def _safe_evidence_url(provider: str, value: str) -> bool:
+    parsed = urlparse(value)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname in _PROVIDER_HOSTS.get(provider, set())
+    )
+
+
 def _title(sheet, title: str, subtitle: str = "") -> None:
     sheet.merge_cells("A1:F1")
     sheet["A1"] = title
@@ -59,7 +82,7 @@ def _title(sheet, title: str, subtitle: str = "") -> None:
     sheet.row_dimensions[1].height = 32
     if subtitle:
         sheet.merge_cells("A2:F2")
-        sheet["A2"] = subtitle
+        sheet["A2"] = safe_excel_value(subtitle)
         sheet["A2"].font = Font(name="Segoe UI", size=10, color="3F5656")
         sheet["A2"].fill = PatternFill("solid", fgColor=_PALE)
         sheet["A2"].alignment = Alignment(wrap_text=True, vertical="center")
@@ -90,6 +113,8 @@ def write_patient_report(
     variants: Sequence[VariantRecord],
     evidence: Sequence[EvidenceResult] | Mapping[str, EvidenceResult],
 ) -> Path:
+    if not isinstance(evidence, Mapping) and evidence:
+        raise ValueError("Evidence must be keyed by patient, variant, and provider identity.")
     output = Path(path)
     if output.suffix.lower() != ".xlsx":
         output = output / f"{_safe_filename(sample)}_MPN_Tolkning.xlsx"
@@ -109,12 +134,12 @@ def write_patient_report(
         context = classify_driver_context(variant)
         overview.append(
             (
-                variant.gene,
-                variant.hgvsc,
-                variant.hgvsp,
+                safe_excel_value(variant.gene),
+                safe_excel_value(variant.hgvsc),
+                safe_excel_value(variant.hgvsp),
                 variant.vaf,
-                context.label,
-                context.detail,
+                safe_excel_value(context.label),
+                safe_excel_value(context.detail),
             )
         )
         overview.cell(overview.max_row, 2).font = Font(name="Consolas", size=10)
@@ -148,17 +173,18 @@ def write_patient_report(
                 result for key, result in evidence.items() if key.startswith(result_prefix)
             ]
         else:
-            variant_evidence = list(evidence)
+            variant_evidence = []
         for item in _sorted_evidence(variant_evidence):
-            sheet.cell(row, 1, item.provider)
+            sheet.cell(row, 1, safe_excel_value(item.provider))
             sheet.cell(row, 2, item.status.value)
-            sheet.cell(row, 3, item.summary)
-            sheet.cell(row, 4, item.url)
-            if item.url.lower().startswith("https://"):
+            sheet.cell(row, 3, safe_excel_value(item.summary))
+            retained_url = item.url if _safe_evidence_url(item.provider, item.url) else ""
+            sheet.cell(row, 4, safe_excel_value(retained_url))
+            if retained_url:
                 sheet.cell(row, 4).hyperlink = item.url
                 sheet.cell(row, 4).style = "Hyperlink"
-            sheet.cell(row, 5, item.expected_identity)
-            sheet.cell(row, 6, item.observed_identity)
+            sheet.cell(row, 5, safe_excel_value(item.expected_identity))
+            sheet.cell(row, 6, safe_excel_value(item.observed_identity))
             for cell in sheet[row]:
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
             row += 1

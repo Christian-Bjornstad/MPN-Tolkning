@@ -24,3 +24,11 @@ def test_capture_accepts_content_and_filename_contains_no_patient_id(tmp_path):
     assert validation.valid
     assert output.name == "3221216b78f71079_clinvar_01.png"
     assert "DIT" not in output.name
+
+
+def test_same_variant_in_two_samples_gets_distinct_hashed_capture_names(tmp_path):
+    stable = "grch37:9:5073770:G:T"
+    first = screenshot_path(tmp_path, f"SAMPLE-A|{stable}", "ClinVar", 1)
+    second = screenshot_path(tmp_path, f"SAMPLE-B|{stable}", "ClinVar", 1)
+    assert first.name != second.name
+    assert "SAMPLE" not in first.name + second.name

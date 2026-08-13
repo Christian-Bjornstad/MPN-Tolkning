@@ -36,7 +36,7 @@ ClinGen Allele Registry provides CAid normalization. CIViC and MetaKB are availa
 - MTBP uses a deterministic generated pseudonym rather than the imported sample ID.
 - Each browser source uses a separate local Microsoft Edge profile.
 - Evidence screenshot filenames contain a stable-key hash, not a patient identifier.
-- Login secrets belong in Windows Credential Manager; they are not written to the JSON settings file.
+- Sign in through each provider's isolated Edge window; passwords are never written to the app's JSON settings file.
 - Interrupted searches resume only incomplete patient/variant/provider units.
 - If Excel locks a report, the completed payload remains pending and can be written later without repeating searches.
 
@@ -45,7 +45,7 @@ Review database terms, licensing, and organizational policy before using automat
 ## Requirements
 
 - Windows 10 or 11
-- Python 3.11 or newer
+- Python 3.12 or newer
 - Microsoft Edge with local DevTools/remote debugging permitted by workstation policy
 - Microsoft Excel or another `.xlsx` viewer for human review
 - Valid organizational access for services that require an account or licence
@@ -55,9 +55,10 @@ Review database terms, licensing, and organizational policy before using automat
 ```powershell
 git clone https://github.com/Christian-Bjornstad/MPN-Tolkning.git
 cd MPN-Tolkning
-py -3.11 -m venv .venv
+py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
+python -m pip install -r requirements-dev.lock
+python -m pip install -e . --no-deps
 mpn-tolkning
 ```
 

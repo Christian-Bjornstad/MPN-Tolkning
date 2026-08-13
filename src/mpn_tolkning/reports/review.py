@@ -7,11 +7,13 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from mpn_tolkning.core.identity import stable_variant_key
+from mpn_tolkning.core.identity import IdentityConfidence, stable_variant_key, variant_identity_confidence
 from mpn_tolkning.core.models import DriverContext, VariantRecord
+from mpn_tolkning.reports.safety import safe_excel_value
 
 
 APP_COLUMNS = (
+    "Application Sample",
     "Stable Variant Key",
     "Driver Context",
     "Artifact Reason",
@@ -73,33 +75,49 @@ def write_review_workbook(
     return _save_atomically(workbook, Path(path))
 
 
-def load_skip_keys(path: Path) -> set[str]:
+def load_skip_keys(path: Path, variants: Iterable[VariantRecord] | None = None) -> set[str]:
     workbook = load_workbook(path, read_only=True, data_only=False)
-    if "All Variants" not in workbook.sheetnames:
-        raise ReviewWorkbookError("Missing 'All Variants' sheet.")
-    sheet = workbook["All Variants"]
-    headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
-    required = ("Sample", "Stable Variant Key", "Skip Database Search (X)")
-    missing = [header for header in required if header not in headers]
-    if missing:
-        raise ReviewWorkbookError("Missing review columns: " + ", ".join(missing))
+    try:
+        if "All Variants" not in workbook.sheetnames:
+            raise ReviewWorkbookError("Missing 'All Variants' sheet.")
+        sheet = workbook["All Variants"]
+        headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+        sample_header = next(
+            (candidate for candidate in ("Application Sample", "Sample", "Sample ID", "DIT") if candidate in headers),
+            None,
+        )
+        required = ("Stable Variant Key", "Skip Database Search (X)")
+        missing = (["Sample/Sample ID/DIT"] if sample_header is None else []) + [
+            header for header in required if header not in headers
+        ]
+        if missing:
+            raise ReviewWorkbookError("Missing review columns: " + ", ".join(missing))
 
-    indexes = {header: headers.index(header) for header in required}
-    identities: set[str] = set()
-    skipped: set[str] = set()
-    for row in sheet.iter_rows(min_row=2, values_only=True):
-        sample = str(row[indexes["Sample"]] or "").strip()
-        stable_key = str(row[indexes["Stable Variant Key"]] or "").strip()
-        if not sample or not stable_key:
-            continue
-        identity = f"{sample}|{stable_key}"
-        if identity in identities:
-            raise ReviewWorkbookError(f"Duplicate review identity: {identity}")
-        identities.add(identity)
-        selection = str(row[indexes["Skip Database Search (X)"]] or "").strip()
-        if selection.upper() == "X":
-            skipped.add(identity)
-    return skipped
+        indexes = {header: headers.index(header) for header in required}
+        indexes["Sample"] = headers.index(sample_header)
+        identities: set[str] = set()
+        skipped: set[str] = set()
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            sample = str(row[indexes["Sample"]] or "").strip()
+            if sample_header == "Application Sample" and len(sample) > 1 and sample[0] == "'" and sample[1] in "=+-@":
+                sample = sample[1:]
+            stable_key = str(row[indexes["Stable Variant Key"]] or "").strip()
+            if not sample or not stable_key:
+                continue
+            identity = f"{sample}|{stable_key}"
+            if identity in identities:
+                raise ReviewWorkbookError(f"Duplicate review identity: {identity}")
+            identities.add(identity)
+            selection = str(row[indexes["Skip Database Search (X)"]] or "").strip()
+            if selection.upper() == "X":
+                skipped.add(identity)
+        if variants is not None:
+            expected = {f"{variant.sample}|{stable_variant_key(variant)}" for variant in variants}
+            if identities != expected:
+                raise ReviewWorkbookError("Review workbook identities do not match the current import.")
+        return skipped
+    finally:
+        workbook.close()
 
 
 def _write_sheet(
@@ -120,10 +138,17 @@ def _write_sheet(
         key = stable_variant_key(variant)
         context = contexts.get(key, DriverContext())
         artifact_reason = artifact_reasons.get(key, "")
-        warning = context.detail if context.needs_review else ""
-        values = [variant.original.get(header, "") for header in original_headers]
+        warnings = [context.detail] if context.needs_review and context.detail else []
+        if variant_identity_confidence(variant) is IdentityConfidence.REDUCED:
+            warnings.append("Reduced identity: exact genomic matching is unavailable.")
+        warning = " ".join(warnings)
+        values = [
+            safe_excel_value(variant.original.get(header, ""))
+            for header in original_headers
+        ]
         values.extend(
             [
+                safe_excel_value(variant.sample),
                 key,
                 context.label,
                 artifact_reason,
@@ -157,7 +182,7 @@ def _write_sheet(
     for column, header in enumerate(headers, start=1):
         letter = get_column_letter(column)
         sheet.column_dimensions[letter].width = _column_width(header)
-        if header == "Stable Variant Key":
+        if header in {"Application Sample", "Stable Variant Key"}:
             sheet.column_dimensions[letter].hidden = True
     for row in sheet.iter_rows(min_row=2):
         for cell in row:

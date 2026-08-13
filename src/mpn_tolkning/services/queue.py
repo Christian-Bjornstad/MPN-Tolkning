@@ -5,7 +5,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping
 
 from mpn_tolkning.core.identity import split_hgvsc, stable_variant_key
-from mpn_tolkning.core.models import EvidenceResult, VariantRecord
+from mpn_tolkning.core.models import EvidenceResult, EvidenceStatus, VariantRecord
 from mpn_tolkning.providers.base import Provider, SearchContext
 
 
@@ -83,6 +83,11 @@ class EvidenceQueue:
         existing: dict[str, EvidenceResult],
     ) -> dict[str, EvidenceResult]:
         results = dict(existing)
+        for provider in self.providers:
+            if hasattr(provider, "pause_checkpoint"):
+                provider.pause_checkpoint = pause.checkpoint
+            if hasattr(provider, "stop_requested"):
+                provider.stop_requested = lambda control=pause: control.stopped
         grouped: OrderedDict[str, list[VariantRecord]] = OrderedDict()
         for variant in variants:
             grouped.setdefault(variant.sample, []).append(variant)
@@ -95,13 +100,25 @@ class EvidenceQueue:
                     continue
                 context = self._context(variant)
                 for provider in self.providers:
+                    supports = getattr(provider, "supports", None)
+                    if supports is not None and not supports(variant):
+                        continue
                     if not pause.checkpoint():
                         return results
                     key = self.result_key(variant, provider.name)
                     prior = results.get(key)
                     if prior is not None and prior.is_complete:
                         continue
-                    result = provider.search(variant, context)
+                    try:
+                        result = provider.search(variant, context)
+                    except Exception as exc:
+                        result = EvidenceResult(
+                            provider.name,
+                            EvidenceStatus.ERROR,
+                            f"{provider.name} lookup failed unexpectedly: {exc}",
+                            retryable=True,
+                            expected_identity=variant.hgvsc,
+                        )
                     results[key] = result
                     if self.audit_callback is not None:
                         self.audit_callback(key, result)

@@ -24,3 +24,10 @@ def test_pages_site_mentions_all_required_evidence_sources():
 def test_public_screenshot_has_desktop_dimensions():
     with Image.open("docs/assets/mpn-tolkning-workbench.png") as screenshot:
         assert screenshot.size == (1440, 900)
+
+
+def test_static_site_has_a_restrictive_content_security_policy():
+    page = Path("site/index.html").read_text(encoding="utf-8")
+    assert "http-equiv=\"Content-Security-Policy\"" in page
+    assert "connect-src 'none'" in page
+    assert "<script" not in page.lower()

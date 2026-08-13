@@ -16,6 +16,12 @@ class EvidenceStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class IdentityConfidence(StrEnum):
+    GENOMIC = "genomic GRCh37 allele"
+    TRANSCRIPT = "transcript-qualified HGVS"
+    REDUCED = "reduced gene/cDNA identity"
+
+
 @dataclass(frozen=True)
 class VariantRecord:
     sample: str

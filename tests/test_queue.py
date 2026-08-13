@@ -86,3 +86,57 @@ def test_stop_requested_before_run_prevents_provider_calls(sample_variants):
 
     assert results == {}
     assert provider.calls == []
+
+
+def test_provider_can_decline_variants_without_invalid_retry_results(sample_variants):
+    class CalrOnlyProvider(FakeProvider):
+        def supports(self, variant):
+            return variant.gene == "CALR"
+
+    provider = CalrOnlyProvider("CALR-ETdb")
+    results = EvidenceQueue([provider]).run(sample_variants, set(), PauseControl())
+
+    assert len(results) == 1
+    assert provider.calls == [("DIT-1001", "CALR", "c.1099_1150del")]
+
+
+def test_provider_exception_is_audited_and_does_not_abort_remaining_units(sample_variants):
+    class BrokenProvider:
+        name = "Broken"
+
+        def search(self, variant, context):
+            raise RuntimeError("provider exploded")
+
+    healthy = FakeProvider("Healthy")
+    saved = []
+    queue = EvidenceQueue(
+        [BrokenProvider(), healthy],
+        audit_callback=lambda key, result: saved.append((key, result)),
+    )
+    results = queue.run(sample_variants[:2], set(), PauseControl())
+    broken = [result for result in results.values() if result.provider == "Broken"]
+    assert len(broken) == 2
+    assert all(result.status is EvidenceStatus.ERROR and result.retryable for result in broken)
+    assert len(healthy.calls) == 2
+    assert len(saved) == 4
+
+
+def test_queue_connects_pause_and_stop_callbacks_to_provider(sample_variants):
+    class Provider:
+        name = "ClinVar"
+        pause_checkpoint = lambda self: None
+        stop_requested = lambda self: False
+
+        def search(self, variant, context):
+            return EvidenceResult(
+                self.name,
+                EvidenceStatus.CANCELLED if self.stop_requested() else EvidenceStatus.FOUND,
+                "state",
+            )
+
+    pause = PauseControl()
+    provider = Provider()
+    queue = EvidenceQueue([provider])
+    pause.request_stop()
+    queue.run(sample_variants[:1], set(), pause)
+    assert provider.stop_requested()

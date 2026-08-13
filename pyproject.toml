@@ -7,7 +7,7 @@ name = "mpn-tolkning"
 version = "0.1.0"
 description = "Windows workstation for JAK2, CALR, and MPL evidence review"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "PyQt6>=6.7",
     "beautifulsoup4>=4.12",
@@ -16,13 +16,13 @@ dependencies = [
     "pandas>=2.2",
     "Pillow>=10.0",
     "reportlab>=4.2",
-    "requests>=2.32",
+    "requests>=2.33",
     "websocket-client>=1.8",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pypdf>=5.0",
+    "pypdf>=6.15",
     "pytest>=8.2",
 ]
 
@@ -38,4 +38,3 @@ mpn_tolkning = ["assets/*.svg", "assets/*.png", "assets/*.ico"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-

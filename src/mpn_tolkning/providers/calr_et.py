@@ -64,6 +64,10 @@ class CalrEtProvider:
         )
         return str(field.get("value") or "") if field else ""
 
+    @staticmethod
+    def supports(variant: VariantRecord) -> bool:
+        return variant.gene.upper() == "CALR"
+
     def _post(self, data: dict[str, str]) -> str:
         response = self.session.post(self.SEARCH_URL, data=data, timeout=self.timeout)
         response.raise_for_status()

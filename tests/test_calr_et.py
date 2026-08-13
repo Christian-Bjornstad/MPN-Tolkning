@@ -64,6 +64,8 @@ def test_calr_et_rejects_non_calr_without_network(monkeypatch):
 
     result = provider.search(variant, _context(variant))
     assert result.status is EvidenceStatus.INVALID_QUERY
+    assert provider.supports(variant) is False
+    assert provider.supports(_variant()) is True
 
 
 def test_calr_et_accepts_documented_cdna_alias_only_when_protein_matches(

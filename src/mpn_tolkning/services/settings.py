@@ -16,6 +16,12 @@ REQUIRED_PROVIDERS = [
     "COSMIC",
 ]
 
+OPTIONAL_PROVIDERS = [
+    "ClinGen Allele Registry",
+    "CIViC",
+    "MetaKB",
+]
+
 
 @dataclass
 class AppSettings:
