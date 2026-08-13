@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
+from pathlib import Path
+from typing import Callable
 from urllib.parse import urljoin
 
 import requests
@@ -8,6 +11,7 @@ from bs4 import BeautifulSoup
 
 from mpn_tolkning.core.models import EvidenceResult, EvidenceStatus, VariantRecord
 from mpn_tolkning.providers.base import SearchContext
+from mpn_tolkning.services.capture import validate_capture
 
 
 _AA3_TO_1 = {
@@ -39,9 +43,18 @@ class CalrEtProvider:
         frozenset(("c.1099_1150del", "c.1092_1143del")),
     }
 
-    def __init__(self, session: requests.Session | None = None, timeout: float = 20.0):
+    def __init__(
+        self,
+        session: requests.Session | None = None,
+        timeout: float = 20.0,
+        *,
+        require_capture: bool = False,
+        capture_callback: Callable[[VariantRecord, SearchContext, str], tuple[Path, ...]] | None = None,
+    ):
         self.session = session or requests.Session()
         self.timeout = timeout
+        self.require_capture = require_capture
+        self.capture_callback = capture_callback
 
     def _csrf_token(self) -> str:
         response = self.session.get(self.SEARCH_URL, timeout=self.timeout)
@@ -77,7 +90,10 @@ class CalrEtProvider:
             html = self._post(
                 {"csrf_token": self._csrf_token(), "nucleotid": cdna, "envoie1": "Submit"}
             )
-            return self._parse(html, variant, cdna)
+            result = self._parse(html, variant, cdna)
+            if result.status is EvidenceStatus.FOUND and self.require_capture:
+                return self._attach_capture(result, variant, context)
+            return result
         except requests.RequestException as exc:
             return EvidenceResult(
                 self.name,
@@ -87,6 +103,41 @@ class CalrEtProvider:
                 retryable=True,
                 expected_identity=cdna,
             )
+
+    def _attach_capture(
+        self,
+        result: EvidenceResult,
+        variant: VariantRecord,
+        context: SearchContext,
+    ) -> EvidenceResult:
+        if self.capture_callback is None:
+            return replace(
+                result,
+                status=EvidenceStatus.INCOMPLETE_CAPTURE,
+                summary="CALR-ETdb identity was verified, but the required browser capture is missing.",
+                retryable=True,
+            )
+        try:
+            paths = tuple(self.capture_callback(variant, context, result.url))
+        except Exception as exc:
+            return replace(
+                result,
+                status=EvidenceStatus.INCOMPLETE_CAPTURE,
+                summary=f"CALR-ETdb capture failed: {exc}",
+                retryable=True,
+            )
+        invalid = [validate_capture(path) for path in paths]
+        invalid = [validation for validation in invalid if not validation.valid]
+        if not paths or invalid:
+            reason = invalid[0].reason if invalid else "missing"
+            return replace(
+                result,
+                status=EvidenceStatus.INCOMPLETE_CAPTURE,
+                summary=f"CALR-ETdb capture is incomplete: {reason}.",
+                retryable=True,
+                screenshots=(),
+            )
+        return replace(result, screenshots=paths)
 
     def _parse(self, html: str, variant: VariantRecord, submitted_cdna: str) -> EvidenceResult:
         soup = BeautifulSoup(html, "html.parser")

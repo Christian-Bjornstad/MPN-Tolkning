@@ -2,6 +2,7 @@ from mpn_tolkning.core.identity import stable_variant_key
 from mpn_tolkning.core.models import EvidenceStatus, VariantRecord
 from mpn_tolkning.providers.base import SearchContext
 from mpn_tolkning.providers.calr_et import CalrEtProvider
+from PIL import Image
 
 
 def _variant(cdna="c.1099_1150del", protein="p.Leu367ThrfsTer46"):
@@ -87,3 +88,33 @@ def test_calr_et_rejects_alias_when_protein_does_not_match(monkeypatch, fixture_
     result = provider.search(variant, _context(variant))
     assert result.status is EvidenceStatus.IDENTITY_MISMATCH
     assert result.retryable is True
+
+
+def test_calr_et_required_capture_rejects_http_only_hit(monkeypatch, fixture_html):
+    provider = CalrEtProvider(require_capture=True)
+    variant = _variant()
+    monkeypatch.setattr(provider, "_csrf_token", lambda: "token")
+    monkeypatch.setattr(provider, "_post", lambda data: fixture_html("calr_et_type1.html"))
+    result = provider.search(variant, _context(variant))
+    assert result.status is EvidenceStatus.INCOMPLETE_CAPTURE
+    assert result.retryable
+
+
+def test_calr_et_capture_callback_must_return_content(tmp_path, monkeypatch, fixture_html):
+    capture = tmp_path / "calr.png"
+
+    def capture_result(variant, context, url):
+        image = Image.new("RGB", (400, 180), "white")
+        for x in range(0, 400, 2):
+            for y in range(180):
+                image.putpixel((x, y), (10, 80, 90))
+        image.save(capture)
+        return (capture,)
+
+    provider = CalrEtProvider(require_capture=True, capture_callback=capture_result)
+    variant = _variant()
+    monkeypatch.setattr(provider, "_csrf_token", lambda: "token")
+    monkeypatch.setattr(provider, "_post", lambda data: fixture_html("calr_et_type1.html"))
+    result = provider.search(variant, _context(variant))
+    assert result.status is EvidenceStatus.FOUND
+    assert result.screenshots == (capture,)
