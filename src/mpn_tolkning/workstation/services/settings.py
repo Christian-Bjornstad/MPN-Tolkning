@@ -1,0 +1,151 @@
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field, fields
+from pathlib import Path
+from typing import Any
+
+from mpn_tolkning.workstation.core import default_artifact_rules
+from mpn_tolkning.workstation.services import credentials
+
+
+@dataclass(slots=True)
+class AppSettings:
+    default_output_dir: str = str(Path.home() / "Desktop")
+    clinvar_api_key: str = ""
+    cosmic_email: str = ""
+    cosmic_password: str = field(default="", repr=False, metadata={"persist": False})
+    oncokb_api_key: str = ""
+    oncokb_email: str = ""
+    oncokb_password: str = field(default="", repr=False, metadata={"persist": False})
+    franklin_api_key: str = ""
+    franklin_email: str = ""
+    franklin_password: str = field(default="", repr=False, metadata={"persist": False})
+    mtbp_email: str = ""
+    mtbp_password: str = field(default="", repr=False, metadata={"persist": False})
+    database_workers: int = 1
+    browser_delay_seconds: int = 10
+    browser_delay_max_seconds: int = 20
+    browser_background: bool = True
+    mtbp_timeout_minutes: int = 20
+    search_included_only: bool = True
+    gnomad_dataset: str = "gnomad_r2_1"
+    mtbp_cancer_type: str = "Blood"
+    last_processed_workbook: str = ""
+    offer_recent_analysis: bool = True
+    artifact_catalog_version: int = 3
+    artifact_rules: list[dict[str, str]] = field(default_factory=default_artifact_rules)
+    enabled_databases: list[str] = field(
+        default_factory=lambda: [
+            "MTBP",
+            "Franklin",
+            "ClinVar",
+            "OncoKB",
+            "COSMIC",
+        ]
+    )
+
+    @classmethod
+    def config_path(cls) -> Path:
+        return Path.home() / ".mpn-tolkning" / "config.json"
+
+    @classmethod
+    def load(cls) -> "AppSettings":
+        path = cls.config_path()
+        if not path.exists():
+            return cls()
+        try:
+            data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+            persisted_fields = {
+                item.name
+                for item in fields(cls)
+                if item.metadata.get("persist") is not False
+            }
+            settings = cls(**{key: value for key, value in data.items() if key in persisted_fields})
+        except Exception:
+            return cls()
+        # Migrate former defaults to the new 10-20 second website-only range while
+        # preserving any delay range the user actually customized.
+        legacy_fixed_delay = (
+            "browser_delay_max_seconds" not in data
+            and settings.browser_delay_seconds == 15
+        )
+        former_default_range = (
+            (settings.browser_delay_seconds, settings.browser_delay_max_seconds)
+            in {(15, 30), (5, 15)}
+        )
+        if legacy_fixed_delay or former_default_range:
+            settings.browser_delay_seconds = 10
+            settings.browser_delay_max_seconds = 20
+        if int(data.get("artifact_catalog_version", 0) or 0) < 2:
+            legacy_hgvsc = {
+                "NM_004119.2:c.1419-4dup",
+                "NM_004119.2:c.1419-4del",
+                "NM_004972.3:c.3291+16dup",
+                "NM_004972.3:c.3291+16del",
+            }
+            configured_hgvsc = {
+                str(entry.get("hgvsc") or "").strip()
+                for entry in settings.artifact_rules
+            }
+            if configured_hgvsc == legacy_hgvsc:
+                settings.artifact_rules = default_artifact_rules()
+            settings.artifact_catalog_version = 2
+        if int(data.get("artifact_catalog_version", 0) or 0) < 3:
+            fragmentation_v1_additions = {
+                "NM_004364.4:c.288C>G",
+                "NM_004364.4:c.280G>C",
+                "NM_004364.4:c.296G>C",
+            }
+            former_v2_hgvsc = {
+                str(entry.get("hgvsc") or "").strip()
+                for entry in default_artifact_rules()
+                if str(entry.get("hgvsc") or "").strip()
+                not in fragmentation_v1_additions
+            }
+            configured_hgvsc = {
+                str(entry.get("hgvsc") or "").strip()
+                for entry in settings.artifact_rules
+            }
+            if configured_hgvsc == former_v2_hgvsc:
+                settings.artifact_rules = default_artifact_rules()
+            settings.artifact_catalog_version = 3
+        settings.browser_delay_seconds = max(0, int(settings.browser_delay_seconds))
+        settings.browser_delay_max_seconds = max(
+            settings.browser_delay_seconds,
+            int(settings.browser_delay_max_seconds),
+        )
+        try:
+            settings.oncokb_password = credentials.get_saved_password(
+                "OncoKB", settings.oncokb_email
+            )
+            settings.cosmic_password = credentials.get_saved_password(
+                "COSMIC", settings.cosmic_email
+            )
+            settings.franklin_password = credentials.get_saved_password(
+                "Franklin", settings.franklin_email
+            )
+            settings.mtbp_password = credentials.get_saved_password(
+                "MTBP", settings.mtbp_email
+            )
+        except Exception:
+            pass
+        return settings
+
+    def save(self) -> None:
+        self.browser_delay_seconds = max(0, int(self.browser_delay_seconds))
+        self.browser_delay_max_seconds = max(
+            self.browser_delay_seconds,
+            int(self.browser_delay_max_seconds),
+        )
+        path = self.config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = asdict(self)
+        for item in fields(self):
+            if item.metadata.get("persist") is False:
+                data.pop(item.name, None)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        credentials.save_password("OncoKB", self.oncokb_email, self.oncokb_password)
+        credentials.save_password("COSMIC", self.cosmic_email, self.cosmic_password)
+        credentials.save_password("Franklin", self.franklin_email, self.franklin_password)
+        credentials.save_password("MTBP", self.mtbp_email, self.mtbp_password)

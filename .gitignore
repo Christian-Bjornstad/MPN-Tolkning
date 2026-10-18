@@ -28,3 +28,7 @@ Thumbs.db
 
 # Isolated feature workspaces
 .worktrees/
+
+# Temporary upstream snapshot
+.upstream-archer/
+outputs/
