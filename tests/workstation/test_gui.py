@@ -101,6 +101,7 @@ def test_database_tab_contains_current_sources(qt_app):
     window = MainWindow()
 
     assert window.databases == [
+        "CALR-ETdb",
         "MTBP",
         "Franklin",
         "ClinVar",
@@ -108,10 +109,11 @@ def test_database_tab_contains_current_sources(qt_app):
         "COSMIC",
     ]
     assert set(window.db_checks) == set(window.databases)
-    assert window.browser_database_combo.count() == 5
-    assert window.browser_database_combo.itemText(0) == "COSMIC"
-    assert window.browser_database_combo.itemText(3) == "ClinVar"
-    assert window.browser_database_combo.itemText(4) == "MTBP"
+    assert window.browser_database_combo.count() == 6
+    assert window.browser_database_combo.itemText(0) == "CALR-ETdb"
+    assert window.browser_database_combo.itemText(1) == "COSMIC"
+    assert window.browser_database_combo.itemText(4) == "ClinVar"
+    assert window.browser_database_combo.itemText(5) == "MTBP"
     assert window.mtbp_cancer_type_edit.text() == window.settings.mtbp_cancer_type
     assert window.oncokb_password_edit.echoMode().name == "Password"
     assert window.cosmic_password_edit.echoMode().name == "Password"

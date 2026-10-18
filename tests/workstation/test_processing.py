@@ -157,6 +157,7 @@ def test_excel_export_preserves_raw_columns_and_adds_database_columns(tmp_path):
             "Franklin",
             "OncoKB",
             "COSMIC",
+            "CALR-ETdb",
         ]
     ]
     assert row[headers.index("HGVSc")] == variant.raw["HGVSc"]

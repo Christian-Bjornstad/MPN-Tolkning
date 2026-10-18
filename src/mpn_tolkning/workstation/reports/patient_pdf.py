@@ -27,7 +27,7 @@ from reportlab.platypus import (
 from mpn_tolkning.workstation.core.models import DatabaseEvidence, ProcessingResult, VariantRecord
 
 
-SCREENSHOT_DATABASE_ORDER = ("MTBP", "Franklin", "ClinVar", "OncoKB", "COSMIC")
+SCREENSHOT_DATABASE_ORDER = ("MTBP", "Franklin", "ClinVar", "OncoKB", "COSMIC", "CALR-ETdb")
 
 
 DIT_PATTERN = re.compile(r"^\d{2}OUM\d{5}$", flags=re.IGNORECASE)

@@ -23,7 +23,7 @@ _AA3_TO_1 = {
 
 
 def _normalize_protein(value: str) -> str:
-    clean = str(value or "").strip().replace("(", "").replace(")", "")
+    clean = str(value or "").rsplit(":", 1)[-1].strip().replace("(", "").replace(")", "")
     clean = clean.removeprefix("p.").replace("Ter", "*")
     for three, one in _AA3_TO_1.items():
         clean = clean.replace(three, one)
@@ -145,18 +145,50 @@ class CalrEtProvider:
 
     def _parse(self, html: str, variant: VariantRecord, submitted_cdna: str) -> EvidenceResult:
         soup = BeautifulSoup(html, "html.parser")
+        if "invalid nucleotide notation format" in soup.get_text(" ", strip=True).lower():
+            return EvidenceResult(
+                self.name, EvidenceStatus.INVALID_QUERY,
+                "CALR-ETdb rejected the nucleotide notation.",
+                url=self.SEARCH_URL, expected_identity=submitted_cdna,
+            )
         table = soup.select_one("#tabl_result table")
         if table is None:
+            container = soup.select_one("#tabl_result")
+            negative = bool(container and re.search(
+                r"no(?:t)?\s+(?:variant\s+)?found|0\s+variant|no\s+results",
+                container.get_text(" ", strip=True), re.IGNORECASE,
+            ))
+            section = soup.select_one("section")
+            if section and section.select_one("#search"):
+                text = section.get_text(" ", strip=True)
+                negative = negative or bool(
+                    "the query doesn't match any variants in the database" in text.lower()
+                    and re.search(r"Query submitted\s*:\s*" + re.escape(submitted_cdna) + r"(?:\s|$)", text)
+                )
             return EvidenceResult(
                 self.name,
-                EvidenceStatus.NOT_FOUND,
-                f"No CALR-ETdb entry for {submitted_cdna}.",
+                EvidenceStatus.NOT_FOUND if negative else EvidenceStatus.ERROR,
+                f"No CALR-ETdb entry for {submitted_cdna}." if negative else "CALR-ETdb returned an unrecognized page.",
                 url=self.SEARCH_URL,
+                retryable=not negative,
                 expected_identity=submitted_cdna,
             )
 
         headers = [cell.get_text(" ", strip=True).lower() for cell in table.select("thead th")]
-        row = table.select_one("tbody tr") or table.select_one("tr:nth-of-type(2)")
+        rows = table.select("tbody tr") or table.select("tr")[1:]
+        candidates = []
+        for candidate in rows:
+            candidate_record = dict(zip(headers, [cell.get_text(" ", strip=True) for cell in candidate.select("td")]))
+            observed = candidate_record.get("nucleotide id", "")
+            if observed == submitted_cdna:
+                candidates.append((0, candidate))
+            elif (
+                frozenset((observed, submitted_cdna)) in self._DOCUMENTED_ALIASES
+                and variant.hgvsp and candidate_record.get("protein id")
+                and _normalize_protein(variant.hgvsp) == _normalize_protein(candidate_record["protein id"])
+            ):
+                candidates.append((1, candidate))
+        row = min(candidates, key=lambda item: item[0])[1] if candidates else (rows[0] if rows else None)
         cells = row.select("td") if row else []
         if not row or len(cells) < 2:
             return EvidenceResult(

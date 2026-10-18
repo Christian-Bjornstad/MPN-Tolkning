@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-SERVICE_PREFIX = "Archer Prosess"
+SERVICE_PREFIX = "MPN Tolkning"
 
 
 class CredentialStoreError(RuntimeError):
@@ -14,7 +14,11 @@ def get_saved_password(provider: str, username: str) -> str:
     try:
         import keyring
 
-        return keyring.get_password(f"{SERVICE_PREFIX}/{provider}", username) or ""
+        return (
+            keyring.get_password(f"{SERVICE_PREFIX}/{provider}", username)
+            or keyring.get_password(f"mpn-tolkning:{provider}", username)
+            or ""
+        )
     except Exception as exc:
         raise CredentialStoreError(
             f"Could not read the saved {provider} password from Windows Credential Manager."

@@ -1036,6 +1036,7 @@ class RunProgressCard(QFrame):
 
 class MainWindow(QMainWindow):
     databases = [
+        "CALR-ETdb",
         "MTBP",
         "Franklin",
         "ClinVar",
@@ -1274,7 +1275,7 @@ class MainWindow(QMainWindow):
         resume_layout = QVBoxLayout(resume)
         resume_layout.setSpacing(8)
         resume_help = QLabel(
-            "Restore variants, X selections, and collected evidence from a processed VPM workbook."
+            "Restore variants, X selections, and collected evidence from a processed MPN workbook."
         )
         resume_help.setObjectName("HelperText")
         resume_help.setWordWrap(True)
@@ -1282,7 +1283,7 @@ class MainWindow(QMainWindow):
         self.resume_edit = QLineEdit()
         self.resume_edit.setReadOnly(True)
         self.resume_edit.setPlaceholderText("No processed workbook loaded")
-        self.resume_edit.setAccessibleName("Processed VPM workbook")
+        self.resume_edit.setAccessibleName("Processed MPN workbook")
         self.resume_btn = QPushButton("Open Processed Workbook")
         self.resume_btn.setObjectName("OutlineButton")
         self.resume_btn.setMinimumHeight(44)
@@ -1430,6 +1431,7 @@ class MainWindow(QMainWindow):
         grid.setHorizontalSpacing(9)
         grid.setVerticalSpacing(6)
         source_copy = {
+            "CALR-ETdb": "CALR variant lookup",
             "MTBP": "Report synthesis",
             "Franklin": "Variant prediction",
             "ClinVar": "Clinical classification",
@@ -1505,7 +1507,7 @@ class MainWindow(QMainWindow):
         self.browser_review_btn.setObjectName("OutlineButton")
         self.browser_review_btn.setEnabled(False)
         self.browser_review_btn.setToolTip(
-            "Runs selected ClinVar, COSMIC, OncoKB, Franklin, and MTBP sources patient-by-patient in visible Edge."
+            "Runs selected CALR-ETdb, ClinVar, COSMIC, OncoKB, Franklin, and MTBP sources patient-by-patient in visible Edge."
         )
         self.browser_review_btn.clicked.connect(self._start_browser_review)
         options_grid.addWidget(browser_label, 3, 0)
@@ -1519,7 +1521,7 @@ class MainWindow(QMainWindow):
         exports.setMinimumHeight(105)
         export_layout = QHBoxLayout(exports)
         export_help = QLabel(
-            "Generate VPM interpretation workbooks with Oversikt, Vedlegg, variant sheets, evidence links, and screenshots."
+            "Generate MPN interpretation workbooks with Oversikt, Vedlegg, variant sheets, evidence links, and screenshots."
         )
         export_help.setObjectName("HelperText")
         export_help.setWordWrap(True)
@@ -1607,6 +1609,7 @@ class MainWindow(QMainWindow):
             return label
 
         provider_rows = [
+            ("CALR-ETdb", web_access("Public CALR cDNA search"), not_required(), not_required()),
             ("ClinVar", web_access("Public website"), not_required(), not_required()),
             ("COSMIC", web_access("Signed-in website"), self.cosmic_email_edit, self.cosmic_password_edit),
             ("OncoKB", web_access("Signed-in website"), self.oncokb_email_edit, self.oncokb_password_edit),
@@ -1738,7 +1741,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Select variant TSV", "", "TSV files (*.tsv *.txt);;All files (*.*)")
         if path:
             self.input_edit.setText(path)
-            output = Path(self.settings.default_output_dir) / f"{Path(path).stem}_VPM_review.xlsx"
+            output = Path(self.settings.default_output_dir) / f"{Path(path).stem}_MPN_review.xlsx"
             self.output_edit.setText(str(output))
 
     def _browse_output(self) -> None:
@@ -1796,7 +1799,7 @@ class MainWindow(QMainWindow):
             self._log(message)
         if ok:
             if not self.output_edit.text().strip():
-                output = Path(self.settings.default_output_dir) / f"{path.stem}_archer_review.xlsx"
+                output = Path(self.settings.default_output_dir) / f"{path.stem}_MPN_review.xlsx"
                 self.output_edit.setText(str(output))
             self._update_process_state()
             QMessageBox.information(self, "Validation", "TSV validation passed.")
@@ -1969,7 +1972,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "No browser sources",
-                "Select at least one of COSMIC, OncoKB, Franklin, or MTBP.",
+                "Select at least one evidence source.",
             )
             return
         self._launch_browser_review(databases)
@@ -2028,13 +2031,13 @@ class MainWindow(QMainWindow):
 
     def _browser_artifact_root(self) -> Path:
         if not self.result:
-            return Path(self.settings.default_output_dir) / "archer_browser_evidence"
+            return Path(self.settings.default_output_dir) / "mpn_browser_evidence"
         output_parent = (
             self.result.output_path.parent
             if self.result.output_path
             else Path(self.settings.default_output_dir)
         )
-        output_stem = self.result.output_path.stem if self.result.output_path else "archer"
+        output_stem = self.result.output_path.stem if self.result.output_path else "mpn"
         return output_parent / f"{output_stem}_browser_evidence"
 
     def _variants_for_search(self):
@@ -2131,7 +2134,7 @@ class MainWindow(QMainWindow):
         )
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Open Processed VPM Workbook",
+            "Open Processed MPN Workbook",
             str(start_dir),
             "Excel Workbook (*.xlsx)",
         )

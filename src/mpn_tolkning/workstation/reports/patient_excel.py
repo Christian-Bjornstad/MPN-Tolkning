@@ -27,7 +27,7 @@ from mpn_tolkning.workstation.reports.manual_fields import (
 )
 
 
-REPORT_DATABASES = ("MTBP", "Franklin", "ClinVar", "OncoKB", "COSMIC")
+REPORT_DATABASES = ("MTBP", "Franklin", "ClinVar", "OncoKB", "COSMIC", "CALR-ETdb")
 VEDLEGG_APP_DIRECTORY = "VEDLEGG_APP"
 
 
@@ -299,22 +299,22 @@ class PatientExcelReportWriter:
         ws = workbook.create_sheet("Oversikt")
         self._base_sheet(ws)
         ws.sheet_properties.tabColor = self.colors["navy"]
-        ws.merge_cells("A1:J2")
+        ws.merge_cells("A1:K2")
         ws["A1"] = f"MPN-tolkning – {patient_id}"
         self._title_style(ws["A1"])
         self._info_row(ws, 5, "DIT/pasientnummer", patient_id, end_column=4)
         self._info_row(ws, 6, "Rapportdato", result.run_date, end_column=4)
         self._info_row(ws, 7, "Antall varianter", len(variants), end_column=4)
-        ws.merge_cells("E4:J7")
+        ws.merge_cells("E4:K7")
         ws["E4"] = patient_comment
         ws["E4"].alignment = Alignment(vertical="top", wrap_text=True)
-        for row in ws.iter_rows(min_row=4, max_row=7, min_col=5, max_col=10):
+        for row in ws.iter_rows(min_row=4, max_row=7, min_col=5, max_col=11):
             for cell in row:
                 cell.fill = PatternFill("solid", fgColor=self.colors["pale_orange"])
         for row in range(4, 8):
             ws.row_dimensions[row].height = 24
 
-        ws.merge_cells("A9:J9")
+        ws.merge_cells("A9:K9")
         ws["A9"] = "Varianter og signifikant evidens"
         self._section_style(ws["A9"])
         headers = [
@@ -380,13 +380,13 @@ class PatientExcelReportWriter:
                     else self.colors["pale_blue"]
                 )
             if fill_color:
-                for column in range(1, 11):
+                for column in range(1, 12):
                     ws.cell(row, column).fill = PatternFill(
                         "solid", fgColor=fill_color
                     )
             # Excel does not auto-fit wrapped cells with an explicit height.
             # Allow for wrapping, not just newline characters (HSMD is last).
-            widths = [14, 31, 25, 52, 32, 22, 22, 22, 22, 22]
+            widths = [14, 31, 25, 52, 32, 22, 22, 22, 22, 22, 22]
             lines = max(
                 sum(max(1, len(textwrap.wrap(line, max(1, width - 7))))
                     for line in str(value or "").split("\n"))
@@ -398,11 +398,11 @@ class PatientExcelReportWriter:
         ws.column_dimensions["C"].width = 25
         ws.column_dimensions["D"].width = 52
         ws.column_dimensions["E"].width = 32
-        for column in "FGHIJ":
+        for column in "FGHIJK":
             ws.column_dimensions[column].width = 22
-        ws.auto_filter.ref = f"A10:J{max(10, 10 + len(variants))}"
+        ws.auto_filter.ref = f"A10:K{max(10, 10 + len(variants))}"
         ws.freeze_panes = "A10"
-        ws.print_area = f"A1:J{max(16, 11 + len(variants))}"
+        ws.print_area = f"A1:K{max(16, 11 + len(variants))}"
 
     def _attachment_sheet(
         self,

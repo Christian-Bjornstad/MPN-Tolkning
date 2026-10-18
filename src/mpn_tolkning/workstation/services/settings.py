@@ -37,6 +37,7 @@ class AppSettings:
     artifact_rules: list[dict[str, str]] = field(default_factory=default_artifact_rules)
     enabled_databases: list[str] = field(
         default_factory=lambda: [
+            "CALR-ETdb",
             "MTBP",
             "Franklin",
             "ClinVar",
@@ -56,6 +57,18 @@ class AppSettings:
             return cls()
         try:
             data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+            # Preserve settings from the original MPN workstation.
+            legacy_fields = {
+                "output_directory": "default_output_dir",
+                "selected_providers": "enabled_databases",
+            }
+            for old, new in legacy_fields.items():
+                if old in data and new not in data:
+                    data[new] = data[old]
+            if "request_delay_min_ms" in data and "browser_delay_seconds" not in data:
+                data["browser_delay_seconds"] = int(data["request_delay_min_ms"]) // 1000
+            if "request_delay_max_ms" in data and "browser_delay_max_seconds" not in data:
+                data["browser_delay_max_seconds"] = int(data["request_delay_max_ms"]) // 1000
             persisted_fields = {
                 item.name
                 for item in fields(cls)

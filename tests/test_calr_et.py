@@ -120,3 +120,25 @@ def test_calr_et_capture_callback_must_return_content(tmp_path, monkeypatch, fix
     result = provider.search(variant, _context(variant))
     assert result.status is EvidenceStatus.FOUND
     assert result.screenshots == (capture,)
+
+
+def test_unrecognized_calr_page_is_error_not_negative():
+    result = CalrEtProvider()._parse("<html>Service temporarily unavailable</html>", _variant(), "c.1099_1150del")
+    assert result.status is EvidenceStatus.ERROR
+    assert result.retryable
+
+
+def test_calr_selects_exact_variant_among_multiple_rows(fixture_html):
+    html = fixture_html("calr_et_type1.html")
+    unrelated = '<tr><td>0</td><td>c.1154_1155insTTGTC</td><td>p.K385Nfs*47</td></tr>'
+    html = html.replace("<tbody>", "<tbody>" + unrelated)
+    result = CalrEtProvider()._parse(html, _variant(), "c.1099_1150del")
+    assert result.status is EvidenceStatus.FOUND
+    assert result.observed_identity == "c.1099_1150del"
+
+
+def test_calr_live_negative_template_without_result_table():
+    html = """<section><p>Query submitted : c.1099_1151del</p><h1 id="search">Results</h1>
+    <p>The query doesn't match any variants in the database</p></section>"""
+    assert CalrEtProvider()._parse(html, _variant(), "c.1099_1151del").status is EvidenceStatus.NOT_FOUND
+    assert CalrEtProvider()._parse(html, _variant(), "c.1099_1150del").status is EvidenceStatus.ERROR

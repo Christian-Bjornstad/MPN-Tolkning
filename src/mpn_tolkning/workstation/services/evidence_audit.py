@@ -31,7 +31,7 @@ RETRYABLE_EVIDENCE_STATUSES = frozenset(
     }
 )
 SCREENSHOT_REQUIRED_DATABASES = frozenset(
-    {"COSMIC", "OncoKB", "Franklin", "ClinVar", "MTBP"}
+    {"COSMIC", "OncoKB", "Franklin", "ClinVar", "MTBP", "CALR-ETdb"}
 )
 
 
@@ -124,6 +124,14 @@ def migrate_loaded_evidence(
     evidence: DatabaseEvidence,
     artifact_root: Path,
 ) -> DatabaseEvidence:
+    verification = evidence.raw.get("identity_verification")
+    if (
+        evidence.database == "CALR-ETdb" and evidence.status == "found"
+        and not (isinstance(verification, dict) and verification.get("accepted") is True)
+    ):
+        evidence.status = "verification_required"
+        evidence.clinical_significance = ""
+        evidence.summary = "Legacy CALR-ETdb result requires cDNA identity verification."
     if (
         evidence.database == "ClinVar"
         and evidence.status == "found"
@@ -133,7 +141,7 @@ def migrate_loaded_evidence(
         evidence.summary = "Legacy ClinVar result requires explicit GRCh37 verification."
     _rebase_screenshot_paths(evidence.raw, artifact_root)
     if (
-        evidence.status == "found"
+        (evidence.status == "found" or (evidence.database == "CALR-ETdb" and evidence.status == "not_found"))
         and evidence.database in SCREENSHOT_REQUIRED_DATABASES
     ):
         records = evidence.raw.get("screenshots")
@@ -146,6 +154,8 @@ def migrate_loaded_evidence(
             paths = [Path(str(evidence.raw["screenshot"]))]
         if not paths or any(not validate_capture(path).valid for path in paths):
             evidence.status = "partial_capture"
+            if evidence.database == "CALR-ETdb":
+                evidence.clinical_significance = ""
             evidence.summary = f"{evidence.database} requires screenshot recapture."
     return evidence
 

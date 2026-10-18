@@ -28,7 +28,7 @@ def test_patient_comment_and_long_hsmd_survive_regeneration(tmp_path):
     writer.write_patient(result, variant.patient_id, [variant], output, {})
     workbook = openpyxl.load_workbook(output)
     sheet = workbook["Oversikt"]
-    assert "E4:J7" in {str(area) for area in sheet.merged_cells.ranges}
+    assert "E4:K7" in {str(area) for area in sheet.merged_cells.ranges}
     assert sheet["E3"].value is None
     assert sheet["E4"].fill.fgColor.rgb == "00FFF3E8"
     sheet["E4"] = "Manuell vurdering\nBevares ved ny generering"
@@ -173,7 +173,7 @@ def test_patient_overview_row_height_follows_short_evidence_line_count(tmp_path)
     try:
         overview = workbook["Oversikt"]
         expected_lines = str(overview["D11"].value).count("\n") + 1
-        assert expected_lines == 6
+        assert expected_lines == 7
         assert overview.row_dimensions[11].height >= expected_lines * 16 + 12
     finally:
         workbook.close()
@@ -310,12 +310,13 @@ def test_patient_data_sheet_includes_artifacts_without_skip_column(tmp_path):
         headers = [cell.value for cell in data[1]]
         assert headers[0] == "Sample"
         assert "Skip Database Search (X)" not in headers
-        assert headers[-5:] == [
+        assert headers[-6:] == [
             "ClinVar Evidence",
             "MTBP Evidence",
             "Franklin Evidence",
             "OncoKB Evidence",
             "COSMIC Evidence",
+            "CALR-ETdb Evidence",
         ]
         assert data.max_row == 3
         assert data.sheet_properties.tabColor.rgb == "004F8A5B"
@@ -499,7 +500,7 @@ def test_patient_excel_report_uses_requested_sheet_layout_and_image_order(tmp_pa
         for row in range(screenshot_heading_row + 1, variant_sheet.max_row + 1)
     )
     assert len(variant_sheet._images) == 6
-    assert IMAGE_DATABASES == ("MTBP", "Franklin", "ClinVar", "OncoKB", "COSMIC")
+    assert IMAGE_DATABASES == ("MTBP", "Franklin", "ClinVar", "OncoKB", "COSMIC", "CALR-ETdb")
     workbook.close()
 
 

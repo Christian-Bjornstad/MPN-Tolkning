@@ -1,89 +1,91 @@
 # MPN Tolkning
 
-![MPN Tolkning workbench](docs/assets/mpn-tolkning-workbench.png)
-
-MPN Tolkning is a Windows workstation for review-first analysis of processed Archer NGS panel variants, focused on **JAK2, CALR, and MPL**. It imports a tab-separated variant file, adds MPN driver context, guides evidence collection, and produces review and per-patient Excel workbooks.
-
-> MPN Tolkning is an interpretation-support and research tool. Qualified laboratory personnel must review every identity match, evidence capture, classification, and report before clinical use.
+MPN Tolkning uses the Archer-prosess workstation, database workflow, and Excel
+reports, with **CALR-ETdb added for CALR variants**. The running application is
+based on Archer main commit `4fda67a43d8002fb2928d60211327b73943967fd`, checked
+on 18 October 2026. It runs independently of any local Archer installation.
 
 ## Workflow
 
-1. Import an Archer processed-variant TSV. Original columns are retained.
-2. Review canonical MPN drivers, candidates, unexpected genes, and configurable artifact rules.
-3. Confirm the review workbook and mark variants that should skip database search.
-4. Collect database evidence in resumable patient/variant/provider units.
-5. Review incremental patient workbooks and verified screenshots.
+1. Import an Archer variant TSV and create the review workbook.
+2. Review **With Artifacts** and mark unwanted searches with `X` in
+   **Skip Database Search (X)**. **Artifacts Removed** provides the filtered view.
+3. Reload the reviewed workbook and select evidence sources.
+4. Run database searches. Pause, stop, resume incomplete work, and retry failed
+   searches use the same workflow as the current Archer application.
+5. Review patient Excel reports and embedded source screenshots. Locked files
+   remain pending and can be saved later without repeating searches.
 
-The interface is designed as a guided workbench rather than an automatic diagnostic system. A database result is complete only when the requested variant identity is verified; required browser sources also need a readable evidence capture.
+Browser sources are CALR-ETdb, COSMIC, OncoKB, Franklin, ClinVar, and MTBP.
+Archer's bounded MTBP concurrency, exact ClinVar GRCh37 checks, COSMIC-ID-only
+searches, focused Franklin captures, and Edge-announced debugging port are retained.
 
-## Evidence sources
+## CALR-ETdb
 
-The standard sequence is:
+- Only CALR variants are sent to this source. Other genes are marked not applicable.
+- The search submits only the `c.…` part of the imported variant's HGVS cDNA.
+  Sample identifiers, full TSV rows, and transcript prefixes are not submitted.
+- The current public search form supports nucleotide notation, protein notation,
+  COSMIC ID and broad categories. It does **not expose genomic-position search**.
+  Missing cDNA is therefore reported as an invalid query rather than guessed.
+- The result must match the exact cDNA. The documented type-1 deletion alias
+  requires a matching protein consequence.
+- The result table and matching variant overview are captured in Edge. The detail
+  page must display the verified cDNA as a complete token before its capture.
+- Unreadable or missing images remain incomplete and can be recaptured. An
+  unrecognized response or invalid notation is never treated as a negative result.
+- Type and Class are database annotations, not automatic clinical classifications.
 
-- **CALR-ETdb** — CALR-specific cDNA lookup, including guarded handling of the documented type-1 deletion alias.
-- **MTBP** — isolated pseudonymous report workflow.
-- **Franklin** — somatic, hg19/GRCh37 context with transcript-first lookup.
-- **ClinVar** — exact GRCh37 chromosome, position, reference, and alternate identity.
-- **OncoKB** — exact gene and alteration verification.
-- **COSMIC** — imported COSV identifier preferred, with canonical GRCh37 verification.
+Source: [CALR-ETdb search](https://www.dsimb.inserm.fr/CALR-ET/php/search_page.php).
+The public `c.1099_1150del` example was verified in Edge on 18 October 2026.
 
-ClinGen Allele Registry provides CAid normalization. CIViC and MetaKB are available as optional, disabled-by-default supplemental sources with exact-match safeguards.
+## Excel outputs
 
-## Privacy and operational safeguards
+The review workbook has the same two-sheet layout, filters, frozen identifiers,
+artifact colours, hidden technical columns, and compact evidence columns as Archer.
+A **CALR-ETdb Evidence** column is added at the right.
 
-- Patient/sample identifiers are never submitted to CALR-ETdb or the five database search pages.
-- CALR-ETdb receives only the `c.…` component of HGVS cDNA.
-- MTBP uses a deterministic generated pseudonym rather than the imported sample ID.
-- Each browser source uses a separate local Microsoft Edge profile.
-- Evidence screenshot filenames contain a stable-key hash, not a patient identifier.
-- Sign in through each provider's isolated Edge window; passwords are never written to the app's JSON settings file.
-- Interrupted searches resume only incomplete patient/variant/provider units.
-- If Excel locks a report, the completed payload remains pending and can be written later without repeating searches.
+Patient reports are named `<patient>_MPN_Tolkning_APP.xlsx` and contain **Oversikt**,
+**Vedlegg**, **Data**, and one sheet per variant. CALR evidence and links appear in
+Oversikt and the variant sheet. CALR screenshots follow the existing MTBP,
+Franklin, ClinVar, OncoKB, and COSMIC image order. Manual patient comments,
+variant comments, and HSMD text survive report regeneration.
 
-Review database terms, licensing, and organizational policy before using automated evidence collection, particularly for licensed services.
+Example workbooks use synthetic identifiers and a public CALR example; other
+sources are shown as not searched.
 
-## Requirements
+## Installation and startup
 
-- Windows 10 or 11
-- Python 3.12 or newer
-- Microsoft Edge with local DevTools/remote debugging permitted by workstation policy
-- Microsoft Excel or another `.xlsx` viewer for human review
-- Valid organizational access for services that require an account or licence
-
-## Installation
+Requires Windows, Python 3.12+, Microsoft Edge with local remote debugging
+permitted, and organizational access to the selected databases.
 
 ```powershell
-git clone https://github.com/Christian-Bjornstad/MPN-Tolkning.git
-cd MPN-Tolkning
-py -3.12 -m venv .venv
-.venv\Scripts\Activate.ps1
 python -m pip install -r requirements-dev.lock
 python -m pip install -e . --no-deps
 mpn-tolkning
+# or
+python -m mpn_tolkning
 ```
 
-Application settings and browser profiles are stored under `%USERPROFILE%\.mpn-tolkning`. Reports are written to the selected output folder, or to `MPN_Output` beside the imported TSV.
+Settings and isolated browser profiles remain under `%USERPROFILE%\.mpn-tolkning`.
+Original MPN output-folder, selected-provider and delay settings are migrated when
+loaded. Existing Windows Credential Manager entries remain readable. Passwords
+are not stored in the JSON settings file.
+
+Processed workbooks created by this version can be reopened with their evidence
+and screenshot audits. Older MPN workbooks using the **All Variants** layout must
+be recreated from their source TSV for the new Archer review layout.
 
 ## Development
 
 ```powershell
 $env:QT_QPA_PLATFORM = "offscreen"
 python -m pytest -q
-python scripts/build_icons.py
 ```
 
-The deterministic test suite uses synthetic fixtures and does not call live evidence sources.
+The active workstation is in `src/mpn_tolkning/workstation`; the earlier MPN
+modules remain for compatibility. Upstream tests are retained in `tests/workstation`.
+See [Archer synchronization notes](docs/archer-sync.md) for provenance and local changes.
 
-## Database links and attribution
-
-- [CALR-ETdb](https://www.dsimb.inserm.fr/CALR-ET/)
-- [ClinVar](https://www.ncbi.nlm.nih.gov/clinvar/)
-- [ClinGen Allele Registry](https://reg.clinicalgenome.org/)
-- [CIViC](https://civicdb.org/)
-- [MetaKB / Cancer Variant Knowledgebase](https://search.cancervariants.org/)
-- [OncoKB](https://www.oncokb.org/)
-- [COSMIC](https://cancer.sanger.ac.uk/cosmic)
-- [Franklin](https://franklin.genoox.com/)
-- [MTBP](https://mtbp.org/)
-
-MPN Tolkning is independent software and is not endorsed by these services.
+This is an interpretation-support and research tool. Qualified laboratory personnel
+must review identity matches, evidence captures, and reports before clinical use.

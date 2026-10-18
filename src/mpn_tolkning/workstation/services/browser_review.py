@@ -35,11 +35,12 @@ from mpn_tolkning.workstation.services.variant_identity import (
 )
 
 
-BROWSER_DATABASES = ("COSMIC", "OncoKB", "Franklin", "ClinVar", "MTBP")
+BROWSER_DATABASES = ("CALR-ETdb", "COSMIC", "OncoKB", "Franklin", "ClinVar", "MTBP")
 MTBP_REPORTS_URL = "https://mtbp.org/patients/"
 MTBP_REPORT_LIMIT = 5
 
 LOGIN_URLS = {
+    "CALR-ETdb": "https://www.dsimb.inserm.fr/CALR-ET/php/search_page.php",
     "ClinVar": "https://www.ncbi.nlm.nih.gov/clinvar/",
     "COSMIC": "https://cancer.sanger.ac.uk/cosmic/login",
     "OncoKB": "https://www.oncokb.org/login",
@@ -313,6 +314,10 @@ class BrowserReviewService:
         prior_evidence: dict[str, list[DatabaseEvidence]] | None = None,
     ) -> dict[str, DatabaseEvidence]:
         self._validate_database(database)
+        if database == "CALR-ETdb":
+            from mpn_tolkning.workstation.services.calr_et import search_calr_variants
+
+            return search_calr_variants(self, variants, artifact_directory, progress=progress)
         if database == "MTBP":
             return self._search_mtbp(
                 variants,

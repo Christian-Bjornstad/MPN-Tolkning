@@ -21,6 +21,7 @@ DEFAULT_DATABASE_COLUMNS = [
     "Franklin",
     "OncoKB",
     "COSMIC",
+    "CALR-ETdb",
 ]
 
 REFERENCE_HIDDEN_COLUMNS = {

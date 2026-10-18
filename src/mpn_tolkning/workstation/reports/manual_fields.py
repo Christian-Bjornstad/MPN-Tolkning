@@ -26,7 +26,7 @@ def read_patient_comment(path: Path) -> str:
         if "Oversikt" not in workbook.sheetnames:
             return ""
         sheet = workbook["Oversikt"]
-        if "E4:J7" not in {str(area) for area in sheet.merged_cells.ranges}:
+        if not {"E4:J7", "E4:K7"}.intersection(str(area) for area in sheet.merged_cells.ranges):
             return ""
         return str(sheet["E4"].value or "")
     finally:
